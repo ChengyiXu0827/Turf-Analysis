@@ -1,0 +1,154 @@
+---
+title: "Case 2-Chengyi"
+author: "Chengyi Xu"
+date: "2/24/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+#Load Data and preference on flavors
+setwd("~/Desktop/ChengyiXu/SpringA/GBA424/Assignment/2")
+qu = read.csv("survQuestions.csv",stringsAsFactors = F)
+re = read.csv('survResponses.csv',stringsAsFactors = F)
+allflavor = re[,15:37] #Extract Q12 of new flavors
+names(allflavor)=c('almond','banana','black cherry','blueberry','caramel','chai','chocolate', 'cinnamon', 'coconut','honey','key lime pie','lemon','mango','maple','peach','pineapple', 'plain','pomegranate','raspberry','strawberry','strawberry banana','vanilla','vanilla banana')
+par(mfrow=c(3,3)); # loop over each flavor to produce bar chart for opinion distribution
+for(j in 1:length(allflavor)){
+  x =allflavor[,j]
+  if(is.numeric(x)){
+    hist(x,main=names(allflavor)[j])
+  } else {
+    plot(x,main=names(allflavor)[j])
+  }
+}
+#Prefer raspberry, strawberry, peach
+#Don't prefer vanilla banana, maple, chai, cinnamon, coconut, chocolate
+```
+
+
+```{r cars}
+#Preference on attributes
+preference = re[,c('Q3_2','Q3_1','Q3_3','Q3_6','Q3_5','Q3_7','Q3_8','Q3_4')]
+names(preference)= c('texture','high protein','better taste','0% fat','all natural','low sugar', 'low calories','flavor available')
+barplot(!is.na(preference),width=2,main = 'Preference on attributes',xlab = 'attributes',ylab = 'number of respondents')
+```
+
+
+```{r cars}
+allflavor[is.na(allflavor)] = 2
+#measReach: measures reach given set of options and data
+  ##Arguments:
+  ##  data contains measure of proxy for whether will buy or not, positive values mean will buy/use
+  ##Return:
+  ##  scalar, reach, calculated as % of all cases that will buy at least one in set
+measReach = function(data){
+  if(is.null(dim(data))){ #if data is a vector
+    ret = sum(data==0,na.rm=TRUE)/length(data)
+  } else if(ncol(data)==1){ #if data has only one column
+    ret = sum(data==0,na.rm=TRUE)/length(data)
+  }
+  else { #if data has multiple columns
+    ret = sum(apply(data==0,1,any),na.rm=TRUE)/nrow(data)
+  }
+}
+#evalNext: evaluates the next set, nextSet using measure given existing set in data
+  ##Arguments:
+  ##  nextSet, set are numeric indexes into columns of data
+  ##  data contains measure of proxy for whether will buy or not, positive values mean will buy/use
+  ##  measure is a valid measure of evaluation when passed a subset of columns in data
+  ##Return:
+  ##  numeric vector of values calculated using measure for each option in nextSet given set already exists
+evalNext = function(nextSet,set,data,measure=measReach){
+  vals = numeric(length(nextSet)) #set up storage for return value
+  for(k in 1:length(nextSet)){ #loop over the options in nextSet
+    if(length(set)==0){         #if no existing options
+      vals[k] = measure(data[,nextSet[k]]) 
+    } else {                    #if existing options
+      vals[k] = measure(data[,c(set,nextSet[k])])
+    }
+  }
+  vals
+}
+
+#evalFull: creates optimal full evaluation starting from origSet and considering remaining options fullSet
+  ##Arguments:
+  ##  fullSet, origSet are numeric indexes into columns of data
+  ##  data contains measure of proxy for whether will buy or not, positive values mean will buy/use
+  ##  measure is a valid measure of evaluation when passed a subset of columns in data
+  ##Return:
+  ##  turf object, an named list containing
+  ##    ordSet, the ordered set of optimal options to add to original set
+  ##    optVals, the optimal values of measure as you add each optimal option
+  ##    origSet, same value as passed, the original set of options included
+  ##    origVal, the value of measure for the original set
+  ##    measure, same value as passed, the measure used
+  ##    pnames, the names of the options taken from the columns of data
+evalFull = function(fullSet,data,origSet=numeric(0),measure=measReach){
+  curSet = origSet; #the current set of included options
+  remSet = fullSet[!(fullSet%in%origSet)]; #the remaining set of options to consider
+  K = length(remSet)
+  optVals = numeric(K); #create storage for the optimal values (optVals)
+  ordSet = numeric(K); #create storage for ordered set
+  for(i in 1:K){          #loop over the remaining set consider
+    tmpVals = evalNext(remSet,curSet,data,measure); #calculate vector of next evaluations
+    k = which.max(tmpVals) #pick the option that gives max measure, note will pick first case if a tie!
+    optVals[i] = tmpVals[k] #add optimal value
+    ordSet[i] = remSet[k]   #add index of option that creates optimal value
+    curSet = c(curSet,ordSet[i]); #add optimal next option to current set
+    remSet = remSet[-k];          #delete optimal next option from remaining set
+  }
+  #creaets a "TURF object" containing ordSet, optVals, origSet, origVal, measure, and pnames
+  turf = list(ordSet=ordSet,optVals=optVals,origSet=origSet,origVal=measure(data[,origSet]),measure=measure,pnames=colnames(data))
+  class(turf)="TURF" #makes the list into a TURF object so that can call plot.TURF
+  turf  #return turf
+}
+#creates ggplot barplot for a turf object
+plot.TURF=function(turf,...){
+  if(class(turf)!="TURF"){
+    cat("Object not a turf.")
+  } else {
+    df = with(turf,data.frame(vals = c(origVal,optVals),titles=paste(0:length(ordSet),c("Original",pnames[ordSet]),sep=":")))
+    #with(turf,barplot(c(origVal,optVals),names.arg=c("Original",pnames[ordSet])))
+    dodge = position_dodge(width=.75); ##to form constant dimensions positioning for all geom's
+    gp = ggplot(df,aes(y=vals,x=titles))
+    gp + geom_bar(position=dodge,stat="identity",col=3,fill=8,width=.75)+
+    theme(axis.text.x = element_text(angle = 90))
+  }
+}
+turf = evalFull(c(1:23),allflavor,c(4,10,15,17,20,22))
+plot(turf)
+#Choose blackcherry and key lime pie flavors
+```
+
+
+```{r cars}
+#Each flavor on regularly buy, occasionally buy and never buy
+regular = colSums(allflavor==0,na.rm = T)
+occasional = colSums(allflavor==1,na.rm = T)
+never = colSums(allflavor==2,na.rm = T)
+par(mfrow=c(3,1))
+barplot(regular,main = 'Flavor that will regularly buy')
+barplot(occasional,main = 'Flavor that will occasionally buy')
+barplot(never,main = 'Flavor that will never buy')
+```
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
